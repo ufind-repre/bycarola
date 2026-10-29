@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fluxo Moda · By Carola</title>
+  <meta name="description" content="Protótipo interativo de gestão da By Carola: produção, estoque, vendas, consignações e financeiro.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23618369'/%3E%3Cpath d='M10 24V8h13v4h-9v3h7v4h-7v5z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="workspace.css">
+  <link rel="stylesheet" href="commerce.css">
+</head>
+<body>
+  <a class="skip" href="#main">Pular para o conteúdo</a>
+  <aside id="sidebar" class="sidebar" aria-label="Menu principal"></aside>
+  <button id="veil" class="veil" aria-label="Fechar menu"></button>
+  <main id="main" tabindex="-1"></main>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div id="toasts" role="status" aria-live="polite"></div>
+  <div id="print-area"></div>
+  <noscript>Ative o JavaScript para utilizar este protótipo.</noscript>
+  <script src="core.js"></script>
+  <script src="integration-core.js"></script>
+  <script src="extensions.js"></script>
+  <script src="workspace-ui.js"></script>
+  <script src="commerce-ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
