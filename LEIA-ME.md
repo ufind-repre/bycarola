@@ -34,6 +34,12 @@ A produção demonstra entradas aprovadas logo na base inicial. Reabrir ou recar
 5. Em Estoque, use Consulta por período. Confira saldo inicial, entradas, saídas, saldo final e valores.
 6. Em Relatórios, experimente Vendas, Clientes por estado/cidade, Produtos e Produção. Use os mesmos filtros para comparar as unidades.
 
+## Simular o alerta de estoque baixo
+
+Na unidade **Fábrica**, abra **Estoque** e localize **Blusa Brisa · exemplo de estoque baixo**, cor **Oliva**, tamanho **M**, referência **DEMO-EST-010**. O saldo inicial de demonstração é de **10 peças** e o card mostra a flag **Estoque baixo**.
+
+A flag aparece para peças com **10 unidades disponíveis ou menos**, ou um mínimo cadastrado maior. Peças em consignação aparecem separadas e não aumentam o saldo disponível. A aba **Estoque baixo**, o aviso da página e o indicador do painel usam a mesma regra. Ao repor o saldo acima do limite, a flag desaparece; saídas que deixam o saldo no limite ou abaixo dele fazem o alerta aparecer. Recarregar a página não recria o saldo inicial do exemplo.
+
 ## Orçamento, faturamento e nota
 
 1. Em Pedidos e vendas, crie um orçamento. Não há baixa nem reserva de estoque.
@@ -43,6 +49,17 @@ A produção demonstra entradas aprovadas logo na base inicial. Reabrir ou recar
 5. Experimente devolver parte de uma venda. O estoque recebe a peça e o financeiro registra o crédito correspondente.
 
 Em pedidos online, o estado fiscal fica separado da entrega: Em separação, Enviado e Entregue.
+
+## Nota de serviço para contas a pagar
+
+1. Abra **Notas fiscais → Notas de serviço** e clique em **Registrar nota de serviço**.
+2. Informe o prestador, número da nota, data de emissão, valor total e descrição do serviço. CPF/CNPJ, série e observações são opcionais.
+3. Preencha o vencimento, a forma de pagamento e a conta financeira. Não há seleção de produto, quantidade ou armazenador.
+4. Confirme em **Registrar nota e gerar conta a pagar**. A nota é registrada no Fiscal e uma única conta em aberto é criada no Financeiro, com o mesmo valor e vínculo à nota.
+5. Use **Consultar** para conferir os dados e a situação da conta. **Ver conta a pagar** abre o lançamento no Financeiro, sem efetuar pagamento automaticamente.
+6. Quando quiser registrar o pagamento, utilize a ação **Pagar** do Financeiro. A consulta da nota passa a mostrar Pago, preservando os dados originais do documento.
+
+A entrada de nota de serviço não altera produtos, estoque, produção, pedidos, consignações, caixas ou cheques. Repetir o registro do mesmo prestador, número, série e unidade é bloqueado para evitar outra conta a pagar. Os filtros permitem consultar por prestador, número, descrição, emissão e situação do pagamento.
 
 ## PDV e resultado por loja
 
@@ -57,6 +74,17 @@ Em pedidos online, o estado fiscal fica separado da entrega: Em separação, Env
 9. Use Gestão By Carola para retornar ao sistema principal.
 
 Os acessos e lojas podem ser cadastrados/alterados em Lojas. Cada venda guarda a identificação da unidade e do vendedor.
+
+## Consultar caixas fechados por data
+
+1. Em Caixas, abra **Histórico de caixas fechados** ou a aba **Histórico de fechamentos**.
+2. Escolha Data inicial e Data final. As duas datas são inclusivas e consideram o dia em que o caixa foi fechado.
+3. Selecione um caixa ou todos os caixas da unidade e clique em Consultar. Use **Todo o histórico** para consultar sem limite de datas.
+4. Clique em Consultar na linha de um fechamento para ver responsável, sessão, valor inicial, dinheiro esperado, dinheiro conferido, diferença e observações.
+5. Nos novos fechamentos, os detalhes também preservam as vendas, os pagamentos e as movimentações daquela sessão.
+6. O botão Histórico de cada card abre a consulta já filtrada para aquele caixa. A opção Movimentações do caixa mantém a consulta dos eventos de abertura, fechamento, reforço e sangria.
+
+Reabrir o caixa não substitui o fechamento anterior. Dois fechamentos no mesmo dia são registros separados. O histórico segue a unidade selecionada e as permissões do usuário. Registros antigos são recuperados sem inventar os valores que não foram registrados; nesses campos aparece —.
 
 ## E-commerce do carrinho à entrega
 
@@ -78,6 +106,19 @@ O pedido online inicial da demonstração também permite explorar o acompanhame
 4. Faça uma correção da quantidade devolvida. O histórico mantém o lançamento anterior e o movimento compensatório.
 5. Registre um acerto parcial: vendidas geram fatura e recebível líquido da comissão; devolvidas retornam à origem.
 6. Consulte os detalhes do romaneio para conferir autor, data e quantidades de cada operação.
+
+## Cheques recebidos de representantes
+
+1. Abra **Cheques**. A carteira aparece em uma tabela, com número, banco, emitente, representante, romaneio, datas, valor e situação.
+2. Clique em **Registrar cheque**, preencha os dados do cheque e escolha o representante que o entregou. O representante pode ser diferente do emitente.
+3. Se quiser, vincule também um romaneio. O seletor mostra os romaneios daquele representante na unidade selecionada. A foto permanece opcional.
+4. Para vincular um cheque que já estava cadastrado, use **Editar / vincular** na linha correspondente.
+5. Consulte por situação, representante, número, banco, emitente ou romaneio. Para datas, escolha se o período se refere ao recebimento ou ao campo **Bom para / vencimento**.
+6. Use **Situação** para atualizar o cheque. As opções são **Em carteira, Depositado, Compensado, Substituído, Cancelado e Descontado**. Ao substituir, cancelar ou descontar, informe o motivo.
+7. Em **Histórico**, acompanhe os dados do cheque, a foto e as alterações com data, responsável e valores anteriores/novos, incluindo mudanças de representante e romaneio.
+8. A exportação CSV utiliza os filtros aplicados à tabela. O histórico segue as unidades autorizadas e as permissões do usuário.
+
+O vínculo identifica de quem o cheque foi recebido. Cadastrar, vincular ou mudar a situação de um cheque não quita automaticamente um acerto de consignação ou uma conta financeira. Registros antigos são preservados; datas e responsáveis não registrados na época aparecem como não informados.
 
 ## Usuários e metas
 

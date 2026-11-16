@@ -316,3 +316,659 @@ test('gráfico mantém valores negativos de devolução dentro da área visível
     points.forEach(([x,y])=>{assert.ok(Number.isFinite(x)&&Number.isFinite(y));assert.ok(y>=0&&y<=205)});
   }
 });
+
+async function closeCashViaForm(h, cashId, {counted, note = 'Conferência realizada no teste de integração'} = {}) {
+  h.A.go('caixa');
+  if (h.context.CarolaCashHistoryUI.filters.view !== 'current') h.E.actions['x-cash-current']();
+  const cash = h.A.state.cash.find(item => item.id === cashId), session = cash.session;
+  const closeButton = h.document.querySelector(`[data-action="cash-close"][data-id="${cashId}"]`);
+  assert.ok(closeButton, 'O caixa aberto precisa oferecer a ação de fechamento.');
+  await h.click(closeButton);
+  const form = h.document.querySelector(`[data-form="cash-close:${cashId}"]`);
+  assert.ok(form, 'O formulário real de conferência precisa ser aberto.');
+  const amount = counted ?? h.A.F.cashExpected(h.A.state, cashId);
+  await h.submit(form, {counted: amount, note});
+  assert.equal(h.A.state.cash.find(item => item.id === cashId).open, false);
+  const snapshot = h.A.state.cashClosings.find(item => item.cashId === cashId && item.session === session);
+  assert.ok(snapshot, 'Submeter a conferência deve preservar um fechamento da sessão.');
+  return snapshot;
+}
+
+test('formulários de caixa preservam a primeira conferência após reabrir, vender e fechar novamente', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const cash = s.cash.find(item => item.unit === 'fab' && item.open);
+  const initialExpected = F.cashExpected(s, cash.id);
+  const first = await closeCashViaForm(h, cash.id, {counted: initialExpected + 5, note: 'Sobra de cinco reais conferida'});
+  assert.equal(first.expected, initialExpected);
+  assert.equal(first.counted, initialExpected + 5);
+  assert.equal(first.difference, 5);
+  assert.equal(first.closedByName, F.user(s).name);
+  const original = JSON.stringify(first);
+
+  const openButton = h.document.querySelector(`[data-action="cash-open"][data-id="${cash.id}"]`);
+  assert.ok(openButton);
+  await h.click(openButton);
+  const openForm = h.document.querySelector(`[data-form="cash-open:${cash.id}"]`);
+  assert.ok(openForm);
+  await h.submit(openForm, {opening: 75});
+  assert.equal(cash.open, true);
+  assert.equal(cash.opening, 75);
+  assert.notEqual(cash.session, first.session);
+  const newOrder = F.sell(s, {unit: 'fab', client: 'Cliente da nova sessão de caixa', items: [{product: 'p1', qty: 1}], method: 'Dinheiro', channel: 'Loja física', cashId: cash.id, cashSession: cash.session});
+  const second = await closeCashViaForm(h, cash.id);
+  assert.equal(second.expected, 75 + newOrder.total);
+  assert.equal(second.counted, second.expected);
+  assert.equal(second.difference, 0);
+  assert.ok(second.sales.some(order => order.id === newOrder.id));
+  assert.equal(first.sales.some(order => order.id === newOrder.id), false);
+  assert.equal(s.cashClosings.filter(item => item.cashId === cash.id).length, 2);
+  assert.equal(JSON.stringify(s.cashClosings.find(item => item.id === first.id)), original);
+
+  await h.click(h.document.querySelector('[data-action="x-cash-closed"]'));
+  const detail = h.document.querySelector(`[data-action="x-cash-closing"][data-id="${first.id}"]`);
+  assert.ok(detail, 'A conferência anterior deve continuar consultável.');
+  await h.click(detail);
+  const markup = h.document.getElementById('dialog-content').innerHTML;
+  assert.match(markup, /Responsável/);
+  assert.match(markup, /Dinheiro esperado/);
+  assert.match(markup, /Dinheiro conferido/);
+  assert.ok(markup.includes(first.closedByName));
+  assert.ok(markup.includes(h.A.brl(first.expected)));
+  assert.ok(markup.includes(h.A.brl(first.counted)));
+  assert.match(markup, /Sobra de cinco reais conferida/);
+  assert.deepEqual(h.errors, []);
+});
+
+test('consulta de fechamentos respeita datas inicial e final inclusivas no formulário real', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const cash = s.cash.find(item => item.unit === 'fab' && item.open);
+  const current = await closeCashViaForm(h, cash.id);
+  const oldDate = F.offset(-6), older = JSON.parse(JSON.stringify(current));
+  Object.assign(older, {id: 'FECHAMENTO-ANTERIOR-TESTE', session: 'SESSAO-ANTERIOR-TESTE', closedDate: oldDate, closedAt: oldDate + 'T16:00:00.000Z', note: 'Conferência anterior para o filtro de datas'});
+  s.cashClosings.push(older);
+  await h.click(h.document.querySelector('[data-action="x-cash-closed"]'));
+  await h.submit(h.document.querySelector('[data-form="x-cash-history-filter"]'), {from: oldDate, to: oldDate, cashId: cash.id});
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, older.id);
+  assert.ok(h.markup.includes(`data-id="${older.id}"`));
+  assert.ok(!h.markup.includes(`data-id="${current.id}"`));
+
+  await h.submit(h.document.querySelector('[data-form="x-cash-history-filter"]'), {from: F.today, to: F.today, cashId: cash.id});
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, current.id);
+  await h.submit(h.document.querySelector('[data-form="x-cash-history-filter"]'), {from: oldDate, to: F.today, cashId: cash.id});
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 2);
+  assert.ok(h.context.CarolaCashHistoryUI.rows.some(item => item.id === older.id));
+  assert.ok(h.context.CarolaCashHistoryUI.rows.some(item => item.id === current.id));
+  assert.deepEqual(h.errors, []);
+});
+
+test('somente visualizar permite consultar datas e detalhes de fechamentos sem operar o caixa', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const cash = s.cash.find(item => item.unit === 'fab' && item.open);
+  const snapshot = await closeCashViaForm(h, cash.id);
+  s.users.push({id: 'cash-readonly', name: 'Consulta de caixas', role: 'Consulta', active: true, email: 'caixas-consulta@exemplo.test', units: ['fab'], permissions: Object.fromEntries(F.modules.map(module => [module, {view: true, edit: false, export: false}]))});
+  await h.change(h.document.getElementById('demo-user'), 'cash-readonly');
+  h.A.go('caixa');
+  assert.equal(h.document.querySelector('[data-action="cash-new"]').disabled, true);
+  assert.equal(h.document.querySelector(`[data-action="cash-open"][data-id="${cash.id}"]`).disabled, true);
+  const historyButton = h.document.querySelector('[data-action="x-cash-closed"]');
+  assert.equal(historyButton.disabled, false);
+  await h.click(historyButton);
+  const filter = h.document.querySelector('[data-form="x-cash-history-filter"]');
+  assert.equal(filter.querySelector('[type="submit"]').disabled, false);
+  await h.submit(filter, {from: F.today, to: F.today, cashId: cash.id});
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  const detail = h.document.querySelector(`[data-action="x-cash-closing"][data-id="${snapshot.id}"]`);
+  assert.equal(detail.disabled, false);
+  await h.click(detail);
+  assert.equal(h.document.getElementById('dialog').open, true);
+  assert.match(h.document.getElementById('dialog-content').innerHTML, /Dinheiro conferido/);
+  assert.equal(s.cashClosings.length, 1);
+  assert.deepEqual(h.errors, []);
+});
+
+test('seletor de unidade isola fechamentos e limpa a seleção anterior de caixa', async () => {
+  const h = createHarness(), s = h.A.state;
+  const factoryCash = s.cash.find(item => item.unit === 'fab' && item.open);
+  const factoryClosing = await closeCashViaForm(h, factoryCash.id);
+  await h.click(h.document.querySelector(`[data-action="cash-history"][data-id="${factoryCash.id}"]`));
+  assert.equal(h.context.CarolaCashHistoryUI.filters.cashId, factoryCash.id);
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+
+  await h.change(h.document.getElementById('demo-unit'), 'mar');
+  assert.equal(s.unit, 'mar');
+  assert.equal(h.context.CarolaCashHistoryUI.filters.cashId, '');
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 0);
+  const storeCash = s.cash.find(item => item.unit === 'mar' && item.open);
+  const storeClosing = await closeCashViaForm(h, storeCash.id);
+  await h.click(h.document.querySelector('[data-action="x-cash-closed"]'));
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, storeClosing.id);
+  assert.ok(!h.markup.includes(`data-id="${factoryClosing.id}"`));
+  await h.change(h.document.getElementById('demo-unit'), 'fab');
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, factoryClosing.id);
+  assert.ok(!h.markup.includes(`data-id="${storeClosing.id}"`));
+  assert.deepEqual(h.errors, []);
+});
+
+test('histórico no cartão do caixa seleciona somente as conferências daquele caixa', async () => {
+  const h = createHarness(), s = h.A.state;
+  const firstCash = s.cash.find(item => item.unit === 'fab' && item.open);
+  const extra = JSON.parse(JSON.stringify(firstCash));
+  Object.assign(extra, {id: 'CX-SEGUNDO-TESTE', name: 'Segundo caixa da fábrica para teste', session: 'SESSAO-SEGUNDO-TESTE', opening: 50, counted: null, difference: null, history: []});
+  s.cash.push(extra);
+  const firstClosing = await closeCashViaForm(h, firstCash.id);
+  const extraClosing = await closeCashViaForm(h, extra.id);
+  const cardHistory = h.document.querySelector(`[data-action="cash-history"][data-id="${firstCash.id}"]`);
+  assert.ok(cardHistory);
+  await h.click(cardHistory);
+  assert.equal(h.context.CarolaCashHistoryUI.filters.view, 'closed');
+  assert.equal(h.context.CarolaCashHistoryUI.filters.cashId, firstCash.id);
+  assert.equal(h.document.querySelector('[data-form="x-cash-history-filter"]').elements.cashId.value, firstCash.id);
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, firstClosing.id);
+  assert.ok(!h.markup.includes(`data-id="${extraClosing.id}"`));
+  await h.click(h.document.querySelector('[data-action="x-cash-current"]'));
+  await h.click(h.document.querySelector(`[data-action="cash-history"][data-id="${extra.id}"]`));
+  assert.equal(h.context.CarolaCashHistoryUI.filters.cashId, extra.id);
+  assert.equal(h.context.CarolaCashHistoryUI.rows.length, 1);
+  assert.equal(h.context.CarolaCashHistoryUI.rows[0].id, extraClosing.id);
+  assert.deepEqual(h.errors, []);
+});
+
+function checkSaveForm(h, id = '') {
+  return h.document.querySelector(id ? `[data-form="x-check-save:${id}"]` : '[data-form="x-check-save"], [data-form="x-check-save:"]');
+}
+
+async function registerCheckViaForm(h, values = {}) {
+  h.A.go('cheques');
+  const create = h.document.querySelector('[data-action="check-new"]');
+  assert.ok(create, 'O cadastro de cheques deve oferecer a criação de um registro.');
+  await h.click(create);
+  let form = checkSaveForm(h);
+  assert.ok(form, 'A criação deve abrir o formulário real de cheque.');
+  const fields = {person: 'Emitente independente do representante', number: '000987', bank: 'Banco do teste', amount: 342.5, due: h.A.F.today, receivedDate: h.A.F.today, representativeId: 'ct2', consignmentId: 'ROM-0101', note: 'Recebido no acerto do representante', ...values};
+  if (fields.representativeId) {
+    await h.change(form.elements.representativeId, fields.representativeId);
+    form = checkSaveForm(h);
+  }
+  if (fields.consignmentId) assert.ok(form.elements.consignmentId.querySelector(`[value="${fields.consignmentId}"]`), 'O romaneio compatível precisa estar disponível no formulário.');
+  await h.submit(form, fields);
+  const check = h.A.state.checks.find(item => item.number === String(fields.number));
+  assert.ok(check, 'Submeter o formulário deve cadastrar o cheque.');
+  return check;
+}
+
+async function changeCheckStatusViaForm(h, id, status, note) {
+  h.A.go('cheques');
+  h.E.actions['check-state'](id);
+  const form = h.document.querySelector(`[data-form="x-check-status:${id}"]`);
+  assert.ok(form, 'A atualização deve abrir o formulário real de situação.');
+  await h.submit(form, {status, note});
+  assert.equal(h.A.state.checks.find(check => check.id === id).status, status);
+}
+
+test('cheque recebido do representante mantém emitente próprio, vínculo e histórico com autor e data', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const check = await registerCheckViaForm(h);
+  assert.equal(check.person, 'Emitente independente do representante');
+  assert.equal(check.representativeId, 'ct2');
+  assert.equal(check.consignmentId, 'ROM-0101');
+  assert.equal(check.unit, 'fab');
+  assert.equal(check.amount, 342.5);
+  assert.equal(check.receivedDate, F.today);
+  assert.equal(check.status, 'Em carteira');
+  assert.notEqual(check.person, s.contacts.find(contact => contact.id === 'ct2').name);
+  assert.ok(h.markup.includes(check.person));
+  const expectedStatuses = ['Em carteira', 'Depositado', 'Compensado', 'Substituído', 'Cancelado', 'Descontado'];
+  const filter = h.document.querySelector('[data-form="x-check-filter"]');
+  assert.ok(filter);
+  assert.deepEqual(Array.from(filter.elements.status.querySelectorAll('option'), option => option.value).filter(Boolean), expectedStatuses);
+
+  h.E.actions['check-state'](check.id);
+  const statusForm = h.document.querySelector(`[data-form="x-check-status:${check.id}"]`);
+  assert.deepEqual(Array.from(statusForm.elements.status.querySelectorAll('option'), option => option.value), expectedStatuses);
+  const before = check.history.length;
+  await h.submit(statusForm, {status: 'Depositado', note: 'Depositado pelo responsável no teste'});
+  const updated = s.checks.find(item => item.id === check.id);
+  assert.equal(updated.status, 'Depositado');
+  assert.equal(updated.history.length, before + 1);
+  const event = updated.history.find(item => item.status === 'Depositado' && item.note === 'Depositado pelo responsável no teste');
+  assert.ok(event);
+  assert.equal(event.date, F.today);
+  assert.ok(JSON.stringify(event).includes(F.user(s).name), 'O histórico precisa identificar o autor da atualização.');
+  h.E.actions['check-history'](check.id);
+  const detail = h.document.getElementById('dialog-content').innerHTML;
+  assert.ok(detail.includes(check.person));
+  assert.ok(detail.includes(s.contacts.find(contact => contact.id === 'ct2').name));
+  assert.ok(detail.includes('ROM-0101'));
+  assert.ok(detail.includes('Depositado pelo responsável no teste'));
+  assert.deepEqual(h.errors, []);
+});
+
+test('editar cheque legado vincula representante e romaneio sem perder dados anteriores', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const legacy = s.checks.find(check => check.id === 'CH-451');
+  assert.ok(legacy);
+  legacy.history.push({date: F.offset(-3), status: legacy.status, note: 'Registro anterior preservado'});
+  legacy.photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxbkAAAAASUVORK5CYII=';
+  h.A.go('cheques');
+  const old = JSON.parse(JSON.stringify(legacy));
+  const edit = h.document.querySelector(`[data-action="x-check-edit"][data-id="${legacy.id}"]`);
+  assert.ok(edit);
+  await h.click(edit);
+  let form = checkSaveForm(h, legacy.id);
+  assert.ok(form);
+  await h.change(form.elements.representativeId, 'ct2');
+  form = checkSaveForm(h, legacy.id);
+  await h.submit(form, {representativeId: 'ct2', consignmentId: 'ROM-0101', note: 'Vínculo conferido depois do cadastro'});
+  const updated = s.checks.find(check => check.id === legacy.id);
+  for (const field of ['person', 'number', 'bank', 'amount', 'due', 'status', 'photo']) assert.equal(updated[field], old[field], field);
+  assert.equal(updated.representativeId, 'ct2');
+  assert.equal(updated.consignmentId, 'ROM-0101');
+  assert.ok(updated.history.length > old.history.length);
+  for (const event of old.history) assert.ok(updated.history.some(item => item.date === event.date && item.status === event.status && item.note === event.note), 'O evento anterior precisa continuar no histórico.');
+  assert.deepEqual(h.errors, []);
+});
+
+test('consulta de cheques combina situação, representante e datas inclusivas de vencimento ou recebimento', async () => {
+  const h = createHarness(), F = h.A.F;
+  const first = await registerCheckViaForm(h, {number: '000991', person: 'Emitente da data inicial', due: F.offset(-3), receivedDate: F.offset(-5)});
+  const second = await registerCheckViaForm(h, {number: '000992', person: 'Emitente da data final', due: F.today, receivedDate: F.today});
+  const third = await registerCheckViaForm(h, {number: '000993', person: 'Emitente de outro representante', representativeId: 'ct3', consignmentId: '', due: F.today, receivedDate: F.today});
+  await changeCheckStatusViaForm(h, first.id, 'Depositado', 'Situação usada no filtro');
+  let form = h.document.querySelector('[data-form="x-check-filter"]');
+  await h.submit(form, {q: 'Emitente da data inicial', status: 'Depositado', representativeId: 'ct2', dateField: 'due', from: first.due, to: first.due});
+  assert.equal(h.context.CarolaChecksUI.rows.length, 1);
+  assert.equal(h.context.CarolaChecksUI.rows[0].id, first.id);
+  form = h.document.querySelector('[data-form="x-check-filter"]');
+  await h.submit(form, {q: '', status: '', representativeId: 'ct2', dateField: 'due', from: first.due, to: second.due});
+  assert.equal(h.context.CarolaChecksUI.rows.length, 2);
+  assert.ok(h.context.CarolaChecksUI.rows.some(check => check.id === first.id));
+  assert.ok(h.context.CarolaChecksUI.rows.some(check => check.id === second.id));
+  assert.equal(h.context.CarolaChecksUI.rows.some(check => check.id === third.id), false);
+  form = h.document.querySelector('[data-form="x-check-filter"]');
+  await h.submit(form, {q: '', status: '', representativeId: 'ct2', dateField: 'receivedDate', from: first.receivedDate, to: first.receivedDate});
+  assert.equal(h.context.CarolaChecksUI.rows.length, 1);
+  assert.equal(h.context.CarolaChecksUI.rows[0].id, first.id);
+  assert.deepEqual(h.errors, []);
+});
+
+test('somente visualizar permite filtros e detalhes de cheques e bloqueia cadastro e edição', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const check = await registerCheckViaForm(h, {number: '000994'});
+  s.users.push({id: 'checks-readonly', name: 'Consulta de cheques', role: 'Consulta', active: true, email: 'cheques-consulta@exemplo.test', units: ['fab'], permissions: Object.fromEntries(F.modules.map(module => [module, {view: true, edit: false, export: false}]))});
+  await h.change(h.document.getElementById('demo-user'), 'checks-readonly');
+  h.A.go('cheques');
+  assert.equal(h.document.querySelector('[data-action="check-new"]').disabled, true);
+  const edit = h.document.querySelector(`[data-action="x-check-edit"][data-id="${check.id}"]`);
+  const changeStatus = h.document.querySelector(`[data-action="check-state"][data-id="${check.id}"]`);
+  assert.ok(!edit || edit.disabled, 'A edição deve estar ausente ou desabilitada para consulta.');
+  assert.ok(!changeStatus || changeStatus.disabled, 'A alteração de situação deve estar ausente ou desabilitada para consulta.');
+  const form = h.document.querySelector('[data-form="x-check-filter"]');
+  assert.equal(form.querySelector('[type="submit"]').disabled, false);
+  await h.submit(form, {q: check.number, status: 'Em carteira', representativeId: 'ct2', dateField: 'due', from: F.today, to: F.today});
+  assert.equal(h.context.CarolaChecksUI.rows.length, 1);
+  const detail = h.document.querySelector(`[data-action="x-check-detail"][data-id="${check.id}"]`) || h.document.querySelector(`[data-action="check-history"][data-id="${check.id}"]`);
+  assert.ok(detail);
+  assert.equal(detail.disabled, false);
+  await h.click(detail);
+  assert.equal(h.document.getElementById('dialog').open, true);
+  assert.ok(h.document.getElementById('dialog-content').innerHTML.includes(check.person));
+  assert.deepEqual(h.errors, []);
+});
+
+test('seletor de unidade isola o registro de cheques e seus filtros', async () => {
+  const h = createHarness(), s = h.A.state;
+  const factory = await registerCheckViaForm(h, {number: '000995'});
+  await h.change(h.document.getElementById('demo-unit'), 'mar');
+  assert.equal(s.unit, 'mar');
+  assert.equal(h.context.CarolaChecksUI.rows.some(check => check.id === factory.id), false);
+  const shop = await registerCheckViaForm(h, {number: '000996', person: 'Emitente da loja de Maringá', representativeId: '', consignmentId: ''});
+  assert.equal(shop.unit, 'mar');
+  assert.ok(h.context.CarolaChecksUI.rows.some(check => check.id === shop.id));
+  assert.equal(h.context.CarolaChecksUI.rows.some(check => check.id === factory.id), false);
+  await h.change(h.document.getElementById('demo-unit'), 'fab');
+  assert.ok(h.context.CarolaChecksUI.rows.some(check => check.id === factory.id));
+  assert.equal(h.context.CarolaChecksUI.rows.some(check => check.id === shop.id), false);
+  assert.deepEqual(h.errors, []);
+});
+
+test('vínculo de cheque rejeita romaneio de outro representante ou unidade sem mutação', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const original = s.consignments.find(rom => rom.id === 'ROM-0101');
+  s.consignments.push({...JSON.parse(JSON.stringify(original)), id: 'ROM-OUTRO-REP-TESTE', rep: 'ct3'});
+  s.consignments.push({...JSON.parse(JSON.stringify(original)), id: 'ROM-OUTRA-UNIDADE-TESTE', unit: 'mar'});
+  h.A.go('cheques');
+  await h.click(h.document.querySelector('[data-action="check-new"]'));
+  let form = checkSaveForm(h);
+  await h.change(form.elements.representativeId, 'ct2');
+  form = checkSaveForm(h);
+  assert.equal(form.elements.consignmentId.querySelector('[value="ROM-OUTRO-REP-TESTE"]'), null);
+  assert.equal(form.elements.consignmentId.querySelector('[value="ROM-OUTRA-UNIDADE-TESTE"]'), null);
+  const before = JSON.stringify(s);
+  for (const incompatible of ['ROM-OUTRO-REP-TESTE', 'ROM-OUTRA-UNIDADE-TESTE']) {
+    await h.submit(form, {person: 'Emitente do vínculo inválido', number: '000997', bank: 'Banco do teste', amount: 90, due: F.today, receivedDate: F.today, representativeId: 'ct2', consignmentId: incompatible, note: 'Não deve ser salvo'});
+    assert.equal(JSON.stringify(s), before, 'Falha de vínculo não pode cadastrar cheque, histórico ou outro dado.');
+    assert.match(form.querySelector('.form-error').textContent, /romaneio|representante|unidade/i);
+  }
+  assert.equal(s.checks.some(check => check.number === '000997'), false);
+  assert.deepEqual(h.errors, []);
+});
+
+function stockDemo(h) {
+  const demo = h.A.state.products.find(product => product.sourceDemoStockAlert);
+  assert.ok(demo, 'A base deve disponibilizar uma peça separada para demonstrar o alerta.');
+  return demo;
+}
+
+function assertStockCardFlag(h, productId, expected) {
+  const movement = h.document.querySelector(`[data-action="move"][data-id="${productId}"]`);
+  assert.ok(movement, 'A variante precisa estar visível no catálogo.');
+  const card = movement.closest('article');
+  assert.ok(card);
+  const flag = card.querySelector('.stock-low-flag');
+  assert.equal(!!flag, expected);
+  assert.equal(card.classList.contains('stock-low-card'), expected);
+  if (flag) {
+    assert.equal(flag.classList.contains('badge'), true);
+    assert.equal(flag.classList.contains('amber'), true);
+  }
+}
+
+function dashboardLowStockCount(h) {
+  h.A.go('inicio');
+  const match = h.markup.match(/<div class="stat-label">Estoque baixo<\/div><div class="stat-value[^"]*">(\d+)<\/div>/);
+  assert.ok(match, 'O painel deve mostrar o indicador de estoque baixo.');
+  return Number(match[1]);
+}
+
+async function showStockProducts(h) {
+  h.A.go('catalogo');
+  if (h.A.tab.catalogo !== 'produtos') await h.click(h.document.querySelector('[data-action="tab"][data-id="produtos"]'));
+}
+
+async function moveStockViaForm(h, productId, type, qty) {
+  await showStockProducts(h);
+  await h.click(h.document.querySelector(`[data-action="move"][data-id="${productId}"]`));
+  const form = h.document.querySelector('[data-form="move"]');
+  assert.ok(form, 'O botão de movimentação precisa abrir o formulário real.');
+  await h.submit(form, {product: productId, loc: 'fab', type, qty, ref: 'ALERTA-ESTOQUE-TESTE', reason: type === 'in' ? 'Reposição conferida no teste' : 'Saída conferida no teste'});
+}
+
+test('peça demonstrativa com dez unidades exibe flag amarela e aparece na aba de estoque baixo', async () => {
+  const h = createHarness(), s = h.A.state, alerts = h.context.CarolaStockAlerts, demo = stockDemo(h);
+  assert.equal(alerts.available(s, demo.id, 'fab'), 10);
+  assert.equal(alerts.isLow(s, demo, 'fab'), true);
+  assert.equal(s.integration.stockAlertDemo, 1);
+  assert.ok(dashboardLowStockCount(h) >= 1);
+  await showStockProducts(h);
+  assertStockCardFlag(h, demo.id, true);
+  const cardMarkup = h.A.catalogCards([demo]);
+  assert.match(cardMarkup, /Estoque disponível/);
+  assert.match(cardMarkup, /Estoque baixo/);
+  assert.match(cardMarkup, /10 peça/);
+  const openLow = h.document.querySelector('[data-action="x-stock-low"]');
+  assert.ok(openLow);
+  await h.click(openLow);
+  assert.equal(h.A.tab.catalogo, 'baixo');
+  assertStockCardFlag(h, demo.id, true);
+  assert.deepEqual(h.errors, []);
+});
+
+test('reposição e saída pelo formulário reconciliam alerta, aba e painel nos saldos onze, dez e nove', async () => {
+  const h = createHarness(), s = h.A.state, alerts = h.context.CarolaStockAlerts, demo = stockDemo(h);
+  const initialCount = dashboardLowStockCount(h);
+  await moveStockViaForm(h, demo.id, 'in', 1);
+  assert.equal(alerts.available(s, demo.id, 'fab'), 11);
+  assert.equal(alerts.isLow(s, demo, 'fab'), false);
+  assertStockCardFlag(h, demo.id, false);
+  await h.click(h.document.querySelector('[data-action="tab"][data-id="baixo"]'));
+  assert.equal(h.document.querySelector(`[data-action="move"][data-id="${demo.id}"]`), null);
+  assert.equal(dashboardLowStockCount(h), initialCount - 1);
+
+  await moveStockViaForm(h, demo.id, 'out', 1);
+  assert.equal(alerts.available(s, demo.id, 'fab'), 10);
+  assert.equal(alerts.isLow(s, demo, 'fab'), true);
+  assertStockCardFlag(h, demo.id, true);
+  await h.click(h.document.querySelector('[data-action="tab"][data-id="baixo"]'));
+  assertStockCardFlag(h, demo.id, true);
+  assert.equal(dashboardLowStockCount(h), initialCount);
+
+  await moveStockViaForm(h, demo.id, 'out', 1);
+  assert.equal(alerts.available(s, demo.id, 'fab'), 9);
+  assertStockCardFlag(h, demo.id, true);
+  assert.equal(dashboardLowStockCount(h), initialCount);
+  assert.deepEqual(h.errors, []);
+});
+
+test('alerta soma saldos físicos, mantém consignado fora do disponível e não sinaliza matéria-prima', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F, alerts = h.context.CarolaStockAlerts, demo = stockDemo(h);
+  F.move(s, demo.id, 'fab', 5, 'Reposição para organizar a remessa de teste');
+  F.transfer(s, demo.id, 'fab', 'rep1', 5, 'Envio consignado de teste', 'ALERTA-CONSIGNADO');
+  s.locations.push({id: 'fab-extra-alert-test', unit: 'fab', type: 'acabado', name: 'Depósito físico adicional do teste'});
+  F.transfer(s, demo.id, 'fab', 'fab-extra-alert-test', 4, 'Organização entre depósitos físicos', 'ALERTA-DEPOSITOS');
+  assert.equal(F.at(s, demo.id, 'fab'), 6);
+  assert.equal(F.at(s, demo.id, 'fab-extra-alert-test'), 4);
+  assert.equal(F.at(s, demo.id, 'rep1'), 5);
+  assert.equal(alerts.available(s, demo.id, 'fab'), 10);
+  assert.equal(alerts.isLow(s, demo, 'fab'), true);
+  await showStockProducts(h);
+  assertStockCardFlag(h, demo.id, true);
+  assert.match(h.A.catalogCards([demo]), /<dt>Estoque disponível<\/dt><dd>10 peça/);
+
+  const material = s.products.find(product => product.kind === 'materia' && product.active);
+  const balance = F.at(s, material.id, 'raw');
+  if (balance !== 9) F.move(s, material.id, 'raw', 9 - balance, 'Balanço de matéria-prima para o teste de alerta');
+  assert.equal(F.at(s, material.id, 'raw'), 9);
+  assert.equal(alerts.isLow(s, material, 'fab'), false);
+  assert.doesNotMatch(h.A.catalogCards([material]), /stock-low-flag|stock-low-card|Estoque baixo/);
+  await h.click(h.document.querySelector('[data-action="tab"][data-id="materia"]'));
+  assertStockCardFlag(h, material.id, false);
+  assert.deepEqual(h.errors, []);
+});
+
+test('demonstração de estoque baixo é separada e não repõe dez unidades ao migrar dados após venda', () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F, C = h.context.CarolaDomain, alerts = h.context.CarolaStockAlerts, demo = stockDemo(h);
+  const original = F.seed();
+  C.migrate(original);
+  for (const product of original.products) for (const location of original.locations) {
+    assert.equal(F.at(s, product.id, location.id), F.at(original, product.id, location.id), 'A demonstração não pode reduzir o saldo de um produto existente.');
+  }
+  F.sell(s, {unit: 'fab', client: 'Cliente do teste de persistência', channel: 'Loja física', method: 'Pix', items: [{product: demo.id, qty: 1}]});
+  assert.equal(alerts.available(s, demo.id, 'fab'), 9);
+  h.A.save();
+  const persisted = JSON.parse(h.context.localStorage.getItem('fluxo-moda-carola-integrado-v1'));
+  const productCount = persisted.products.length, moveCount = persisted.moves.length;
+  C.migrate(persisted); alerts.ensureDemo(persisted);
+  C.migrate(persisted); alerts.ensureDemo(persisted);
+  assert.equal(persisted.integration.stockAlertDemo, 1);
+  assert.equal(persisted.products.filter(product => product.sourceDemoStockAlert).length, 1);
+  assert.equal(persisted.products.length, productCount);
+  assert.equal(persisted.moves.length, moveCount);
+  assert.equal(alerts.available(persisted, demo.id, 'fab'), 9);
+  for (const product of original.products) for (const location of original.locations) {
+    assert.equal(F.at(persisted, product.id, location.id), F.at(original, product.id, location.id));
+  }
+  assert.deepEqual(h.errors, []);
+});
+
+function otherServiceFlowsSnapshot(state) {
+  const fields = ['products', 'locations', 'moves', 'ops', 'orders', 'returns', 'consignments', 'cash', 'cashMoves', 'cashClosings', 'checks', 'targets', 'targetHistory', 'goalHistory', 'productionSnapshot', 'productionImports', 'productionEntries', 'customers', 'contacts', 'remittances', 'punches', 'numberVoids', 'stores', 'units', 'users', 'settings'];
+  return JSON.stringify(Object.fromEntries(fields.map(field => [field, state[field] ?? null])));
+}
+
+async function openServiceNotes(h) {
+  h.A.go('fiscal');
+  const tab = h.document.querySelector('[data-action="tab"][data-id="servicos"]');
+  assert.ok(tab, 'O fiscal deve oferecer a aba de notas de serviço.');
+  await h.click(tab);
+  assert.equal(h.A.tab.fiscal, 'servicos');
+}
+
+function serviceNoteFields(h, overrides = {}) {
+  return {person: 'Prestadora de costura do teste', providerDocument: '12345678000190', reference: 'SERV-TESTE-001', series: 'A', date: h.A.F.today, amount: 625.75, description: 'Serviço de costura terceirizada', due: h.A.F.offset(12), method: 'Boleto', bank: 'Conta de serviços', notes: 'Programar o pagamento conforme combinado', ...overrides};
+}
+
+async function registerServiceNoteViaForm(h, overrides = {}) {
+  await openServiceNotes(h);
+  const create = h.document.querySelector('[data-action="x-service-note-new"]');
+  assert.ok(create);
+  await h.click(create);
+  const form = h.document.querySelector('[data-form="x-service-note-register"]');
+  assert.ok(form, 'A nota de serviço deve ter seu formulário próprio.');
+  const values = serviceNoteFields(h, overrides);
+  await h.submit(form, values);
+  const note = h.A.state.notes.find(item => item.kind === 'Serviço' && item.reference === values.reference && item.person === values.person && item.unit === h.A.state.unit);
+  assert.ok(note, 'A submissão do formulário deve registrar a nota de serviço.');
+  const payable = h.A.state.titles.find(title => title.id === note.payableId);
+  assert.ok(payable);
+  return {note, payable, values};
+}
+
+test('nota de serviço pelo formulário gera somente uma conta a pagar e preserva todos os outros fluxos', async () => {
+  const h = createHarness(), s = h.A.state;
+  const before = otherServiceFlowsSnapshot(s), noteCount = s.notes.length, titleCount = s.titles.length;
+  const {note, payable, values} = await registerServiceNoteViaForm(h);
+  assert.equal(s.notes.length, noteCount + 1);
+  assert.equal(s.titles.length, titleCount + 1);
+  assert.equal(note.kind, 'Serviço');
+  assert.equal(note.category, 'service');
+  assert.equal(note.unit, 'fab');
+  assert.equal(note.person, values.person);
+  assert.equal(note.providerDocument, values.providerDocument);
+  assert.equal(note.reference, values.reference);
+  assert.equal(note.series, values.series);
+  assert.equal(note.date, values.date);
+  assert.equal(note.amount, values.amount);
+  assert.equal(note.description, values.description);
+  assert.equal(note.payableId, payable.id);
+  assert.equal(payable.type, 'pagar');
+  assert.equal(payable.status, 'Aberto');
+  assert.equal(payable.source, 'service-note');
+  assert.equal(payable.nf, note.id);
+  assert.equal(payable.unit, 'fab');
+  assert.equal(payable.person, values.person);
+  assert.equal(payable.amount, values.amount);
+  assert.equal(payable.date, values.date);
+  assert.equal(payable.due, values.due);
+  assert.equal(payable.method, values.method);
+  assert.equal(payable.bank, values.bank);
+  assert.equal(otherServiceFlowsSnapshot(s), before, 'A nota não pode mexer em estoque, produção, pedidos, romaneios, caixas, cheques, metas ou cadastros.');
+  assert.equal(h.document.getElementById('dialog').open, false);
+  assert.ok(h.context.CarolaServiceNotesUI.rows.some(item => item.id === note.id));
+  assert.deepEqual(h.errors, []);
+});
+
+test('detalhe da nota de serviço abre a conta sem pagar e a liquidação financeira preserva a nota', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const {note, payable} = await registerServiceNoteViaForm(h, {reference: 'SERV-PAGAMENTO-001'});
+  const originalNote = JSON.stringify(note), beforeOther = otherServiceFlowsSnapshot(s), titleCount = s.titles.length, noteCount = s.notes.length;
+  assert.ok(h.markup.includes(note.reference));
+  const details = h.document.querySelector(`[data-action="x-service-note-detail"][data-id="${note.id}"]`);
+  assert.ok(details);
+  await h.click(details);
+  const detailMarkup = h.document.getElementById('dialog-content').innerHTML;
+  assert.ok(detailMarkup.includes(note.reference));
+  assert.ok(detailMarkup.includes(payable.id));
+  assert.ok(detailMarkup.includes(note.person));
+  const toPayable = h.document.querySelector(`[data-action="x-service-note-payable"][data-id="${note.id}"]`);
+  assert.ok(toPayable);
+  await h.click(toPayable);
+  assert.equal(h.A.route, 'financeiro');
+  assert.equal(h.A.tab.financeiro, 'pagar');
+  assert.equal(h.A.filter.fin.q, payable.id);
+  assert.equal(payable.status, 'Aberto', 'Navegar para a conta não pode efetuar pagamento.');
+  assert.equal(JSON.stringify(note), originalNote);
+  assert.equal(otherServiceFlowsSnapshot(s), beforeOther);
+
+  const pay = h.document.querySelector(`[data-action="title-pay"][data-id="${payable.id}"]`);
+  assert.ok(pay);
+  await h.click(pay);
+  const paymentForm = h.document.querySelector(`[data-form="title-pay:${payable.id}"]`);
+  assert.ok(paymentForm);
+  await h.submit(paymentForm, {paid: F.today, bank: 'Conta usada na liquidação do teste'});
+  assert.equal(payable.status, 'Pago');
+  assert.equal(payable.paid, F.today);
+  assert.equal(payable.bank, 'Conta usada na liquidação do teste');
+  assert.equal(JSON.stringify(note), originalNote, 'Pagar a conta vinculada não pode alterar o documento da nota.');
+  assert.equal(s.titles.length, titleCount);
+  assert.equal(s.notes.length, noteCount);
+  assert.equal(otherServiceFlowsSnapshot(s), beforeOther);
+  await openServiceNotes(h);
+  const listed = h.context.CarolaServiceNotesUI.rows.find(item => item.id === note.id);
+  assert.ok(listed);
+  assert.equal(listed.payableStatus, 'Pago');
+  assert.equal(listed.payable.id, payable.id);
+  assert.equal(JSON.stringify(s.notes.find(item => item.id === note.id)), originalNote);
+  assert.deepEqual(h.errors, []);
+});
+
+test('repetir nota de serviço do mesmo prestador, número, série e unidade não cria outra conta', async () => {
+  const h = createHarness(), s = h.A.state;
+  const {values} = await registerServiceNoteViaForm(h, {reference: 'SERV-DUPLICADA-001'});
+  await h.click(h.document.querySelector('[data-action="x-service-note-new"]'));
+  const form = h.document.querySelector('[data-form="x-service-note-register"]');
+  const before = JSON.stringify(s);
+  await h.submit(form, {...values, amount: 999, notes: 'Tentativa repetida não deve criar conta'});
+  assert.equal(JSON.stringify(s), before);
+  assert.equal(h.document.getElementById('dialog').open, true);
+  assert.match(form.querySelector('.form-error').textContent, /já|duplic|registr|cadastr/i);
+  assert.deepEqual(h.errors, []);
+});
+
+test('consulta de notas de serviço mantém filtros e detalhes para acesso somente leitura', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const {note} = await registerServiceNoteViaForm(h, {reference: 'SERV-CONSULTA-001'});
+  s.users.push({id: 'service-notes-readonly', name: 'Consulta de notas de serviço', role: 'Consulta', active: true, email: 'servicos-consulta@exemplo.test', units: ['fab'], permissions: Object.fromEntries(F.modules.map(module => [module, {view: true, edit: false, export: false}]))});
+  await h.change(h.document.getElementById('demo-user'), 'service-notes-readonly');
+  await openServiceNotes(h);
+  const create = h.document.querySelector('[data-action="x-service-note-new"]');
+  assert.ok(!create || create.disabled, 'O acesso somente leitura não pode registrar notas.');
+  const filter = h.document.querySelector('[data-form="x-service-note-filter"]');
+  assert.ok(filter);
+  assert.equal(filter.querySelector('[type="submit"]').disabled, false);
+  await h.submit(filter, {q: note.reference, status: 'Aberto', from: F.today, to: F.today});
+  assert.equal(h.context.CarolaServiceNotesUI.rows.length, 1);
+  assert.equal(h.context.CarolaServiceNotesUI.rows[0].id, note.id);
+  const details = h.document.querySelector(`[data-action="x-service-note-detail"][data-id="${note.id}"]`);
+  assert.ok(details);
+  assert.equal(details.disabled, false);
+  await h.click(details);
+  assert.ok(h.document.getElementById('dialog-content').innerHTML.includes(note.reference));
+  const before = JSON.stringify(s);
+  assert.throws(() => h.E.actions['x-service-note-new'](), /permiss|acesso/i);
+  assert.equal(JSON.stringify(s), before);
+  F.user(s).permissions.financeiro.view = false;
+  assert.throws(() => h.E.actions['x-service-note-payable'](note.id), /permiss|acesso/i);
+  assert.equal(h.A.route, 'fiscal');
+  assert.deepEqual(h.errors, []);
+});
+
+test('notas de serviço ficam isoladas por unidade e permitem numeração igual em outra loja', async () => {
+  const h = createHarness(), s = h.A.state, F = h.A.F;
+  const factory = await registerServiceNoteViaForm(h, {reference: 'SERV-UNIDADE-001', date: F.offset(-2)});
+  await h.change(h.document.getElementById('demo-unit'), 'mar');
+  assert.equal(s.unit, 'mar');
+  await openServiceNotes(h);
+  assert.equal(h.context.CarolaServiceNotesUI.rows.some(item => item.id === factory.note.id), false);
+  const shop = await registerServiceNoteViaForm(h, {reference: factory.note.reference, series: factory.note.series, person: factory.note.person, providerDocument: factory.note.providerDocument, date: F.today});
+  assert.equal(shop.note.unit, 'mar');
+  assert.equal(shop.payable.unit, 'mar');
+  assert.notEqual(shop.note.id, factory.note.id);
+  assert.notEqual(shop.payable.id, factory.payable.id);
+  assert.equal(h.context.CarolaServiceNotesUI.rows.some(item => item.id === factory.note.id), false);
+  await h.submit(h.document.querySelector('[data-form="x-service-note-filter"]'), {q: shop.note.reference, status: 'Aberto', from: F.today, to: F.today});
+  assert.equal(h.context.CarolaServiceNotesUI.rows.length, 1);
+  assert.equal(h.context.CarolaServiceNotesUI.rows[0].id, shop.note.id);
+  await h.change(h.document.getElementById('demo-unit'), 'fab');
+  await openServiceNotes(h);
+  await h.submit(h.document.querySelector('[data-form="x-service-note-filter"]'), {q: factory.note.reference, status: 'Aberto', from: factory.note.date, to: factory.note.date});
+  assert.equal(h.context.CarolaServiceNotesUI.rows.length, 1);
+  assert.equal(h.context.CarolaServiceNotesUI.rows[0].id, factory.note.id);
+  assert.equal(h.context.CarolaServiceNotesUI.rows.some(item => item.id === shop.note.id), false);
+  assert.equal(s.titles.filter(title => title.source === 'service-note').length, 2);
+  assert.deepEqual(h.errors, []);
+});

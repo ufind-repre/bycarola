@@ -34,6 +34,10 @@ O menu passa a se chamar **Estoque**. Entradas manuais, transferências, balanç
 
 ## Painel e relatórios
 
+O alerta de reposição de peças usa saldo físico disponível por variante e unidade, sem somar peças em consignação. A flag **Estoque baixo** aparece com **10 unidades ou menos**; se o produto tiver mínimo maior cadastrado, esse limite é mantido. O aviso da página, a aba de estoque baixo e o indicador do painel usam a mesma regra. Matérias-primas mantêm seu controle próprio de mínimo.
+
+Uma variante demonstrativa da **Blusa Brisa**, cor **Oliva**, tamanho **M**, recebe 10 unidades na Fábrica. Esse cadastro é feito uma única vez, sem reduzir saldos de produtos existentes e sem repor automaticamente peças vendidas. O saldo demonstrativo é identificado como abertura para não ser tratado como novidade nas entradas da meta.
+
 O painel mantém os períodos rápidos e acrescenta início/fim livres, unidade selecionada ou consolidação das unidades autorizadas. Indicadores, gráfico e resumo por unidade seguem o período aplicado. O relatório pode ser aberto ou exportado a partir dessa seleção.
 
 | Relatório | Conteúdo |
@@ -67,6 +71,14 @@ O mesmo romaneio aceita adição de peças, devolução e correção de devoluç
 
 O acerto parcial ou final continua a apurar vendidas/devolvidas, comissão, fatura e conta a receber. Os limites de peças em posse e estoque disponível são verificados antes da conclusão; operações inválidas são revertidas integralmente.
 
+## Histórico de caixas fechados
+
+A área Caixas inclui uma consulta por data inicial/final do fechamento e por caixa da unidade. Os limites são inclusivos; a opção Todo o histórico permite consultar todos os fechamentos disponíveis. O Histórico de cada card abre a consulta com o caixa correspondente selecionado.
+
+Cada novo fechamento preserva sessão, nome do caixa, unidade, abertura, responsável, horário, valor inicial, vendas, pagamentos, crédito aplicado nas trocas, dinheiro esperado, conferência, diferença, observações e movimentações. Reabrir o caixa cria outra sessão e não recalcula os fechamentos anteriores.
+
+Fechamentos antigos são recuperados uma única vez a partir do histórico existente. Campos sem registro ficam indisponíveis, sem usar o saldo atual para reconstruir uma conferência passada. A consulta respeita as unidades autorizadas e permanece disponível ao usuário com permissão de visualização; abertura e fechamento continuam exigindo permissão de operação e operador autorizado.
+
 ## Lojas e ambientes comerciais
 
 O cadastro de **Lojas** relaciona nome, cidade, estado, endereço, unidade de estoque e acessos de gerente/vendedor. Uma nova unidade recebe armazenador e caixa. Vendas guardam loja e vendedor para os relatórios.
@@ -85,6 +97,16 @@ PDV e e-commerce saem do menu lateral e passam a abrir pelo botão **Ambientes**
 
 O vendedor é identificado na operação. Descontos acima do limite demonstrativo exigem perfil de gerente. Nas trocas em dinheiro, o caixa recebe somente a diferença após aplicar o crédito; os registros de venda e devolução permanecem no histórico.
 
+## Carteira e histórico de cheques
+
+A área Cheques usa uma tabela com número, banco, emitente, representante, romaneio, recebimento, vencimento, valor e situação. Há filtros por texto, situação, representante e período, com escolha entre data de recebimento e vencimento; os limites são inclusivos.
+
+As situações disponíveis para novos registros e alterações são: **Em carteira, Depositado, Compensado, Substituído, Cancelado e Descontado**. As informações já registradas anteriormente são preservadas. A mudança de situação entra no histórico com data, responsável e observação; substituição, cancelamento e desconto exigem motivo.
+
+O cheque pode ser associado a um representante cadastrado do consignado, sem substituir a identificação do emitente. Um romaneio é opcional e deve pertencer ao mesmo representante e à unidade do cheque. A edição permite vincular cheques existentes e mantém os valores anteriores e novos no histórico.
+
+A foto continua opcional. Editar sem enviar outra foto mantém o anexo existente; removê-lo exige a opção explícita. Dados antigos sem data ou autor não recebem valores inventados. A consulta e a exportação respeitam permissões e unidades autorizadas; o vínculo do cheque não movimenta estoque, não gera venda e não liquida automaticamente títulos ou acertos.
+
 ## Usuários e recursos humanos
 
 No mesmo formulário de usuário há seção de RH: funcionário, matrícula, nascimento, admissão, cargo/setor, meta individual e observações de acessos/responsabilidades. A lista de aniversariantes do mês é calculada pelas datas de nascimento. As permissões individuais por área/ação e unidade permanecem disponíveis.
@@ -101,6 +123,14 @@ O formulário permite selecionar início, fim, unidade e valorização por preç
 - A transferência para outra unidade pode representar entrada para a unidade de destino; na consolidação, a transferência entre unidades do mesmo escopo não é novidade.
 - Os quatro níveis percentuais editáveis do zip continuam disponíveis.
 - O histórico guarda período, base, entradas, meta e fechamento. Uma revisão do mesmo período é registrada; períodos distintos sobrepostos são bloqueados.
+
+## Notas de serviço recebidas
+
+Notas de serviço recebidas têm uma aba própria no Fiscal. O cadastro registra prestador, identificação da nota, emissão, descrição, valor e condições de pagamento. A confirmação cria somente o documento e um título financeiro do tipo **pagar**, em **Aberto**, vinculado à nota, com vencimento e valor correspondentes.
+
+Esse registro não movimenta estoque, não atualiza produtos ou custos, não gera pedidos, produção, acertos de consignação, caixa ou cheques. A operação é atômica: dados inválidos ou uma nota repetida não criam lançamentos parciais nem títulos adicionais. O pagamento ocorre apenas pela ação já existente no Financeiro. A consulta fiscal reflete o estado atual do título sem alterar o documento original.
+
+A listagem tem filtros por prestador, número, descrição, data de emissão e situação do título. Consulta e registro respeitam as permissões fiscais e as unidades autorizadas. O atalho ao Financeiro depende da permissão de visualização dessa área.
 
 ## Preservação e limites
 
